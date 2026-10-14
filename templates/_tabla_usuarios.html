@@ -1,0 +1,31 @@
+<h2>Usuarios</h2>
+<div class="tabla-wrap">
+  <table>
+    <thead><tr><th>ID</th><th>Usuario</th><th>Rol</th></tr></thead>
+    <tbody id="filas"><tr><td colspan="3">Cargando…</td></tr></tbody>
+  </table>
+</div>
+<a class="btn" href="/usuarios" target="_blank" rel="noopener">Ver JSON</a>
+<script>
+  async function cargarUsuarios() {
+    const filas = document.getElementById('filas');
+    const unaFila = texto => {
+      const tr = document.createElement('tr'), td = document.createElement('td');
+      td.colSpan = 3; td.textContent = texto; tr.appendChild(td); return tr;
+    };
+    try {
+      const r = await fetch('/usuarios');
+      if (r.status === 401) return location.replace('/login');
+      const datos = await r.json().catch(() => ({}));
+      if (!r.ok) return filas.replaceChildren(unaFila(datos.error || 'No se pudo cargar la lista.'));
+      filas.replaceChildren(...datos.map(u => {
+        const tr = document.createElement('tr');
+        [u.id, u.usuario, u.rol].forEach(v => {
+          const td = document.createElement('td'); td.textContent = v; tr.appendChild(td);
+        });
+        return tr;
+      }));
+    } catch { filas.replaceChildren(unaFila('No se pudo conectar con el servidor.')); }
+  }
+  cargarUsuarios();
+</script>

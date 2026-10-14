@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="manifest" href="/manifest.json">
+  <title>{% block titulo %}App Usuarios{% endblock %}</title>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;color:#0f172a;
+         min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+    .tarjeta{background:#fff;width:100%;max-width:400px;border-radius:20px;padding:28px 24px;box-shadow:0 10px 30px #0006}
+    h1{margin:0 0 4px;font-size:1.5rem} p.sub{margin:0 0 20px;color:#64748b}
+    label{display:block;font-size:.85rem;margin:14px 0 6px;color:#334155}
+    input,select{width:100%;background:#fff;padding:13px;border:1px solid #cbd5e1;border-radius:12px;font-size:1rem}
+    input:focus,select:focus{outline:2px solid #2563eb;border-color:#2563eb}
+    button{width:100%;margin-top:20px;padding:14px;border:0;border-radius:12px;background:#2563eb;color:#fff;
+           font-size:1rem;font-weight:600;cursor:pointer} button:disabled{opacity:.6}
+    button.sec{background:#e2e8f0;color:#0f172a}
+    .btn{display:block;margin-top:14px;padding:12px;border:2px solid #2563eb;border-radius:12px;background:#fff;color:#2563eb;
+         font-size:1rem;font-weight:600;text-align:center}
+    .alerta{display:none;margin-top:16px;padding:12px;border-radius:10px;font-size:.9rem}
+    .alerta.error{display:block;background:#fee2e2;color:#b91c1c;border:1px solid #ef4444}
+    .alerta.ok{display:block;background:#dcfce7;color:#166534;border:1px solid #22c55e}
+    a{color:#2563eb;text-decoration:none} .centro{text-align:center;margin-top:18px;font-size:.9rem}
+    h2{font-size:1.05rem;margin:22px 0 6px}
+    .tabla-wrap{overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;margin-top:8px}
+    table{width:100%;border-collapse:collapse;font-size:.9rem}
+    th,td{text-align:left;padding:9px 12px;border-bottom:1px solid #e2e8f0} th{background:#f1f5f9;color:#334155}
+    tr:last-child td{border-bottom:0}
+    .aviso{margin-top:14px;padding:12px;border-radius:10px;font-size:.9rem;background:#f1f5f9;color:#334155}
+    .rol{display:inline-block;background:#dbeafe;color:#1d4ed8;padding:4px 12px;border-radius:99px;font-weight:600;font-size:.85rem}
+  </style>
+</head>
+<body><main class="tarjeta">{% block contenido %}{% endblock %}</main>
+{% block scripts %}{% endblock %}
+</body></html>

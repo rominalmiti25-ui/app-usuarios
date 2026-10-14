@@ -1,0 +1,13 @@
+{% extends "home_base.html" %}
+{% block titulo %}Mi cuenta{% endblock %}
+{% block panel %}
+<p>Bienvenido. Aquí está la información de tu cuenta.</p>
+<div class="tabla-wrap">
+  <table>
+    <tr><th>ID</th><td>{{ sesion.sub }}</td></tr>
+    <tr><th>Usuario</th><td>{{ sesion.usuario }}</td></tr>
+    <tr><th>Rol</th><td>{{ sesion.rol }}</td></tr>
+  </table>
+</div>
+<div class="aviso">Tu cuenta es de cliente: no tienes acceso a la lista de usuarios ni puedes crear cuentas.</div>
+{% endblock %}

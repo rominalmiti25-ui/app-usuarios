@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block titulo %}Inicio{% endblock %}
+{% block contenido %}
+<h1>Hola, {{ sesion.usuario }}</h1>
+<p class="sub">ID {{ sesion.sub }} · <span class="rol">{{ sesion.rol }}</span></p>
+{% block panel %}{% endblock %}
+<button id="salir" class="sec">Cerrar sesión</button>
+{% endblock %}
+{% block scripts %}
+<script>
+  // US02-E2: si el navegador restaura esta vista desde caché (botón Atrás), se vuelve a validar la sesión
+  addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+
+  document.getElementById('salir').addEventListener('click', async () => {
+    try { await fetch('/auth/logout', {method: 'POST'}); } catch {}
+    localStorage.clear(); sessionStorage.clear();   // US02-E3
+    location.replace('/login');                     // replace: elimina la vista del historial
+  });
+</script>
+{% endblock %}

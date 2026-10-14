@@ -1,0 +1,50 @@
+{% extends "home_base.html" %}
+{% block titulo %}Panel de administración{% endblock %}
+{% block panel %}
+<p>Panel de administración: creas usuarios, eliges su rol y consultas la lista completa.</p>
+
+<h2>Crear usuario</h2>
+<form id="form-nuevo">
+  <label for="nuevo-usuario">Usuario</label>
+  <input id="nuevo-usuario" required autocomplete="off">
+  <label for="nuevo-password">Contraseña (mín. 6)</label>
+  <input id="nuevo-password" type="password" required autocomplete="new-password">
+  <label for="nuevo-password2">Confirmar contraseña</label>
+  <input id="nuevo-password2" type="password" required autocomplete="new-password">
+  <label for="nuevo-rol">Rol</label>
+  <select id="nuevo-rol" required>
+    <option value="Cliente">Cliente</option>
+    <option value="Auditor">Auditor</option>
+    <option value="Administrador">Administrador</option>
+  </select>
+  <div id="alerta" class="alerta" role="alert"></div>
+  <button id="btn-crear" type="submit">Crear usuario</button>
+</form>
+
+{% include "_tabla_usuarios.html" %}
+<script>
+  const alerta = document.getElementById('alerta'), btnCrear = document.getElementById('btn-crear');
+  const msg = (t, tipo) => { alerta.textContent = t; alerta.className = 'alerta ' + tipo; };
+
+  document.getElementById('form-nuevo').addEventListener('submit', async e => {
+    e.preventDefault(); alerta.className = 'alerta';
+    const usuario = document.getElementById('nuevo-usuario');
+    const rol = document.getElementById('nuevo-rol');
+    const pass = document.getElementById('nuevo-password'), pass2 = document.getElementById('nuevo-password2');
+    if (pass.value !== pass2.value) return msg('Las contraseñas no coinciden.', 'error');
+    if (!navigator.onLine) return msg('Sin conexión a internet.', 'error');
+    btnCrear.disabled = true;
+    try {
+      const r = await fetch('/auth/registro', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({usuario: usuario.value, password: pass.value, rol: rol.value})});
+      if (r.status === 401) return location.replace('/login');
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 201) {
+        msg('Usuario creado (ID ' + d.id + ', rol ' + d.rol + ').', 'ok');
+        e.target.reset(); cargarUsuarios();
+      } else msg(d.error || 'Error inesperado', 'error');
+    } catch { msg('No se pudo conectar con el servidor.', 'error'); }
+    btnCrear.disabled = false;
+  });
+</script>
+{% endblock %}
