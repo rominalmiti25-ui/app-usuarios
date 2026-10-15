@@ -1,6 +1,6 @@
 from functools import wraps
 
-from flask import Flask, g, jsonify, make_response, redirect, render_template, request
+from flask import Flask, g, jsonify, make_response, redirect, render_template, request, send_from_directory
 
 from .models import Rol
 from .services import CredencialesInvalidas, ErrorValidacion, ServicioAutenticacion, ServicioUsuarios
@@ -101,8 +101,21 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
 
     @app.get("/manifest.json")
     def manifest():
-        return jsonify(name="App Usuarios", short_name="Usuarios", start_url="/login",
-                       display="standalone", background_color="#0f172a", theme_color="#2563eb", icons=[])
+        return jsonify(
+            id="/", name="App Usuarios", short_name="Usuarios",
+            start_url="/login", scope="/", display="standalone",
+            background_color="#0f172a", theme_color="#2563eb",
+            icons=[
+                {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                {"src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            ],
+        )
+
+    @app.get("/sw.js")
+    def service_worker():
+        # Se sirve desde la raíz para que controle todo el sitio
+        return send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
 
     @app.errorhandler(500)
     def error_interno(_):
