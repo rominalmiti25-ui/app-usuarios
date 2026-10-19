@@ -1,15 +1,37 @@
 {% extends "base.html" %}
 {% block titulo %}Inicio{% endblock %}
 {% block contenido %}
+<style>
+  .tarjeta{max-width:560px}
+  [hidden]{display:none!important}
+  .tabs{display:flex;gap:6px;margin:14px 0 4px;background:#f1f5f9;padding:4px;border-radius:14px}
+  .tabs .tab{flex:1;width:auto;margin:0;padding:10px;background:transparent;color:#334155;border-radius:10px;font-size:.95rem}
+  .tabs .tab.activa{background:#2563eb;color:#fff}
+</style>
 <h1>Hola, {{ sesion.usuario }}</h1>
 <p class="sub">ID {{ sesion.sub }} · <span class="rol">{{ sesion.rol }}</span></p>
-{% block panel %}{% endblock %}
+
+<div class="tabs" role="tablist">
+  <button type="button" class="tab activa" data-tab="productos" role="tab">Productos</button>
+  <button type="button" class="tab" data-tab="panel" role="tab">{% if sesion.rol in ('Administrador', 'Auditor') %}Usuarios{% else %}Mi cuenta{% endif %}</button>
+</div>
+
+<section id="tab-productos">{% include "_catalogo.html" %}</section>
+<section id="tab-panel" hidden>{% block panel %}{% endblock %}</section>
+
 <button id="salir" class="sec">Cerrar sesión</button>
 {% endblock %}
 {% block scripts %}
 <script>
   // US02-E2: si el navegador restaura esta vista desde caché (botón Atrás), se vuelve a validar la sesión
   addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+
+  // Pestañas: Productos / Usuarios (o Mi cuenta)
+  document.querySelectorAll('.tabs .tab').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.tabs .tab').forEach(x => x.classList.toggle('activa', x === b));
+    document.getElementById('tab-productos').hidden = b.dataset.tab !== 'productos';
+    document.getElementById('tab-panel').hidden = b.dataset.tab !== 'panel';
+  }));
 
   document.getElementById('salir').addEventListener('click', async () => {
     try { await fetch('/auth/logout', {method: 'POST'}); } catch {}

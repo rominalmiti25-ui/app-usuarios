@@ -1,12 +1,13 @@
 import re
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 
 import jwt
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .config import Config
-from .models import Rol, Usuario
-from .repository import UsuarioDuplicado, UsuarioRepository
+from .models import Producto, Rol, Usuario
+from .repository import ProductoRepository, UsuarioDuplicado, UsuarioRepository
 
 
 class ErrorValidacion(Exception):
@@ -14,6 +15,10 @@ class ErrorValidacion(Exception):
 
 
 class CredencialesInvalidas(Exception):
+    pass
+
+
+class ProductoNoEncontrado(Exception):
     pass
 
 
@@ -76,3 +81,50 @@ class ServicioUsuarios:
             return self._repo.crear(nombre, self._auth.hashear(contrasena), rol)
         except UsuarioDuplicado:
             raise ErrorValidacion("Ese nombre de usuario ya existe.")
+
+
+class ServicioProductos:
+    """Casos de uso del catálogo: listar, filtrar por categoría, ver detalle, editar y eliminar."""
+
+    def __init__(self, repositorio: ProductoRepository) -> None:
+        self._repo = repositorio
+
+    def listar(self, categoria: str | None = None) -> list[Producto]:
+        return self._repo.listar((categoria or "").strip() or None)
+
+    def categorias(self) -> list[str]:
+        return self._repo.categorias()
+
+    def obtener(self, producto_id: int) -> Producto:
+        producto = self._repo.obtener(producto_id)
+        if producto is None:
+            raise ProductoNoEncontrado()
+        return producto
+
+    def actualizar(self, producto_id: int, datos: dict) -> Producto:
+        self.obtener(producto_id)  # lanza ProductoNoEncontrado si no existe
+
+        titulo = str(datos.get("titulo") or "").strip()
+        descripcion = str(datos.get("descripcion") or "").strip()
+        categoria = str(datos.get("categoria") or "").strip()
+
+        if not 3 <= len(titulo) <= 150:
+            raise ErrorValidacion("El título debe tener de 3 a 150 caracteres.")
+        try:
+            precio = Decimal(str(datos.get("precio")))
+            if not precio.is_finite() or precio <= 0 or precio >= Decimal("100000000"):
+                raise InvalidOperation()
+            precio = precio.quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError, TypeError):
+            raise ErrorValidacion("El precio debe ser un número mayor que 0.")
+        if not 1 <= len(descripcion) <= 2000:
+            raise ErrorValidacion("La descripción es obligatoria (máximo 2000 caracteres).")
+        if not 2 <= len(categoria) <= 50:
+            raise ErrorValidacion("La categoría debe tener de 2 a 50 caracteres.")
+
+        self._repo.actualizar(producto_id, titulo, precio, descripcion, categoria)
+        return self.obtener(producto_id)
+
+    def eliminar(self, producto_id: int) -> None:
+        if not self._repo.eliminar(producto_id):
+            raise ProductoNoEncontrado()

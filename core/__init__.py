@@ -4,8 +4,9 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from .config import Config
 from .models import Rol
 from .database import Database
-from .repository import UsuarioRepository
-from .services import ServicioAutenticacion, ServicioUsuarios
+from .repository import ProductoRepository, UsuarioRepository
+from .semilla import PRODUCTOS_SEMILLA
+from .services import ServicioAutenticacion, ServicioProductos, ServicioUsuarios
 from .routes import registrar_rutas
 
 
@@ -19,8 +20,10 @@ def create_app() -> Flask:
     config = Config()
     base_datos = Database(config)
     repositorio = UsuarioRepository(base_datos)
+    repositorio_productos = ProductoRepository(base_datos)
     auth = ServicioAutenticacion(config, repositorio)
     usuarios = ServicioUsuarios(repositorio, auth)
+    productos = ServicioProductos(repositorio_productos)
 
     try:
         base_datos.inicializar_esquema()
@@ -31,5 +34,14 @@ def create_app() -> Flask:
     except Exception as error:  # la app arranca aunque la BD tarde en responder
         app.logger.error("No se pudo inicializar la base de datos: %s", error)
 
-    registrar_rutas(app, auth, usuarios)
+    try:
+        # Catálogo inicial: solo se carga si la tabla productos está vacía
+        if repositorio_productos.contar() == 0:
+            for item in PRODUCTOS_SEMILLA:
+                repositorio_productos.crear(**item)
+            app.logger.info("Catálogo inicial creado: %d productos", len(PRODUCTOS_SEMILLA))
+    except Exception as error:
+        app.logger.error("No se pudo cargar el catálogo inicial: %s", error)
+
+    registrar_rutas(app, auth, usuarios, productos)
     return app

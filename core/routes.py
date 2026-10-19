@@ -3,7 +3,10 @@ from functools import wraps
 from flask import Flask, g, jsonify, make_response, redirect, render_template, request, send_from_directory
 
 from .models import Rol
-from .services import CredencialesInvalidas, ErrorValidacion, ServicioAutenticacion, ServicioUsuarios
+from .services import (
+    CredencialesInvalidas, ErrorValidacion, ProductoNoEncontrado,
+    ServicioAutenticacion, ServicioProductos, ServicioUsuarios,
+)
 
 COOKIE = "token"
 
@@ -15,7 +18,8 @@ PANTALLAS = {
 }
 
 
-def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioUsuarios) -> None:
+def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioUsuarios,
+                    productos: ServicioProductos) -> None:
 
     def requiere_sesion(vista):
         """Para pantallas: sin sesión redirige al login."""
@@ -43,8 +47,16 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
             return envoltura
         return decorador
 
+    def producto_json(producto) -> dict:
+        # La imagen se entrega como URL completa para que web y app la descarguen igual
+        return producto.a_dict(request.url_root)
+
     @app.after_request
     def sin_cache(resp):
+        # Las imágenes públicas del catálogo sí se pueden guardar en caché (rendimiento)
+        if request.path.startswith("/static/productos/"):
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
         # Evita que el botón "Atrás" muestre vistas protegidas guardadas en caché (US02)
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp.headers["Pragma"] = "no-cache"
@@ -70,6 +82,53 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
     @requiere_rol(Rol.ADMINISTRADOR, Rol.AUDITOR)
     def ver_usuarios():
         return jsonify(usuarios.listar())
+
+    # ───────────────────────── Catálogo de productos (US03, US04, US05) ─────────────────────────
+
+    @app.get("/products")
+    @requiere_rol(*Rol.TODOS)
+    def api_productos():
+        return jsonify([producto_json(p) for p in productos.listar()])
+
+    @app.get("/products/categories")
+    @requiere_rol(*Rol.TODOS)
+    def api_categorias():
+        return jsonify(productos.categorias())
+
+    @app.get("/products/category/<categoria>")
+    @requiere_rol(*Rol.TODOS)
+    def api_productos_por_categoria(categoria):
+        return jsonify([producto_json(p) for p in productos.listar(categoria)])
+
+    @app.get("/products/<int:producto_id>")
+    @requiere_rol(*Rol.TODOS)
+    def api_producto(producto_id):
+        try:
+            return jsonify(producto_json(productos.obtener(producto_id)))
+        except ProductoNoEncontrado:
+            return jsonify(error="Producto no disponible"), 404
+
+    @app.put("/products/<int:producto_id>")
+    @requiere_rol(Rol.ADMINISTRADOR)
+    def api_actualizar_producto(producto_id):
+        cuerpo = request.get_json(silent=True) or {}
+        try:
+            return jsonify(producto_json(productos.actualizar(producto_id, cuerpo)))
+        except ProductoNoEncontrado:
+            return jsonify(error="Producto no disponible"), 404
+        except ErrorValidacion as error:
+            return jsonify(error=str(error)), 400
+
+    @app.delete("/products/<int:producto_id>")
+    @requiere_rol(Rol.ADMINISTRADOR)
+    def api_eliminar_producto(producto_id):
+        try:
+            productos.eliminar(producto_id)
+        except ProductoNoEncontrado:
+            return jsonify(error="Producto no disponible"), 404
+        return jsonify(ok=True)
+
+    # ───────────────────────── Autenticación ─────────────────────────
 
     @app.post("/auth/login")
     def api_login():

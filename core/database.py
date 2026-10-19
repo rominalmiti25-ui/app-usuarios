@@ -51,3 +51,17 @@ class Database:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS productos (
+                    id INT NOT NULL AUTO_INCREMENT,
+                    titulo VARCHAR(150) NOT NULL,
+                    precio DECIMAL(10,2) NOT NULL,
+                    descripcion TEXT NOT NULL,
+                    categoria VARCHAR(50) NOT NULL,
+                    imagen VARCHAR(255) NOT NULL,
+                    PRIMARY KEY (id),
+                    KEY idx_categoria (categoria)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )

@@ -1,0 +1,205 @@
+<style>
+  .chips{display:flex;gap:8px;overflow-x:auto;padding:12px 0 6px;-webkit-overflow-scrolling:touch}
+  .chips .chip{flex:0 0 auto;width:auto;margin:0;padding:8px 14px;border-radius:99px;background:#fff;color:#2563eb;
+               border:1.5px solid #2563eb;font-size:.85rem;font-weight:600}
+  .chips .chip.activa{background:#2563eb;color:#fff}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:10px}
+  .prod{border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;background:#fff;cursor:pointer;display:flex;flex-direction:column}
+  .prod:focus-visible{outline:2px solid #2563eb}
+  .prod img{width:100%;aspect-ratio:1/1;object-fit:cover;background:#e2e8f0;display:block}
+  .prod h3{margin:10px 10px 4px;font-size:.9rem;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;
+           -webkit-box-orient:vertical;overflow:hidden}
+  .prod .precio{margin:0 10px 12px;font-weight:700;color:#2563eb}
+  .spinner{width:42px;height:42px;border:4px solid #dbeafe;border-top-color:#2563eb;border-radius:50%;
+           margin:36px auto;animation:giro .8s linear infinite}
+  @keyframes giro{to{transform:rotate(360deg)}}
+  .vacio{text-align:center;color:#64748b;padding:24px 8px}
+  #cat-detalle .volver{width:auto;margin:12px 0 10px;padding:8px 14px;font-size:.9rem}
+  #cat-detalle .det-img{width:100%;max-height:340px;object-fit:cover;border-radius:14px;background:#e2e8f0;display:block}
+  #cat-detalle .det-titulo{font-size:1.3rem;margin:14px 0 4px}
+  #cat-detalle .det-precio{margin:0 0 10px;font-size:1.25rem;font-weight:700;color:#2563eb}
+  #cat-detalle .det-desc{line-height:1.5;color:#334155}
+  #cat-detalle textarea{width:100%;padding:13px;border:1px solid #cbd5e1;border-radius:12px;font-size:1rem;
+                        font-family:inherit;min-height:110px;resize:vertical}
+  #cat-detalle .acciones{display:flex;gap:10px}
+  #cat-detalle .acciones button{margin-top:16px}
+  #cat-detalle .peligro{background:#dc2626}
+</style>
+
+<div id="cat-app">
+  <div id="cat-chips" class="chips" aria-label="Categorías"></div>
+  <div id="cat-estado"></div>
+  <div id="cat-grid" class="grid"></div>
+  <div id="cat-detalle" hidden></div>
+</div>
+
+<script>
+(() => {
+  // El perfil se lee de la sesión del servidor (JWT), nunca de datos que mande el cliente
+  const ROL = {{ sesion.rol|tojson }};
+  const ES_ADMIN = ROL === 'Administrador';
+
+  const $ = id => document.getElementById(id);
+  const chips = $('cat-chips'), estado = $('cat-estado'), grid = $('cat-grid'), detalle = $('cat-detalle');
+  let categorias = [], categoriaActiva = null, productos = [], peticion = 0, cambiado = false;
+
+  const dinero = n => new Intl.NumberFormat('es-MX', {style: 'currency', currency: 'MXN'}).format(n);
+
+  // Crea elementos con textContent (los datos del catálogo nunca se insertan como HTML)
+  const el = (tag, attrs = {}, ...hijos) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'class') n.className = v;
+      else if (k === 'text') n.textContent = v;
+      else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v);
+    }
+    hijos.forEach(h => h && n.append(h));
+    return n;
+  };
+
+  async function pedir(url, opciones) {
+    let r;
+    try { r = await fetch(url, opciones); }
+    catch { throw new Error('No se pudo conectar con el servidor. Revisa tu conexión.'); }
+    if (r.status === 401) { location.replace('/login'); throw new Error('sesion'); }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error(d.error || 'Error inesperado'); e.status = r.status; throw e; }
+    return d;
+  }
+
+  // ── Estado de carga y de error (US03-E2, US03-E3) ──
+  const mostrarCarga = () => estado.replaceChildren(el('div', {class: 'spinner', role: 'status', 'aria-label': 'Cargando'}));
+  function mostrarError(mensaje) {
+    estado.replaceChildren(
+      el('div', {class: 'alerta error', role: 'alert', text: mensaje}),
+      el('button', {type: 'button', text: 'Reintentar', onclick: () => { cargarCategorias(); cargarProductos(); }})
+    );
+  }
+
+  // ── Categorías (US04-E1) ──
+  async function cargarCategorias() {
+    try { categorias = await pedir('/products/categories'); } catch { /* el catálogo igual se intenta cargar */ }
+    if (categoriaActiva && !categorias.includes(categoriaActiva)) categoriaActiva = null;
+    pintarChips();
+  }
+  function pintarChips() {
+    const chip = (texto, valor) => el('button', {
+      type: 'button', class: 'chip' + (categoriaActiva === valor ? ' activa' : ''), text: texto,
+      onclick: () => seleccionar(valor)
+    });
+    chips.replaceChildren(chip('Ver todos', null), ...categorias.map(c => chip(c, c)));
+  }
+  function seleccionar(valor) {
+    if (valor === categoriaActiva) return;
+    categoriaActiva = valor;      // null = "Ver todos": vuelve a consumir /products (US04-E3)
+    pintarChips();
+    cargarProductos();            // US04-E2
+  }
+
+  // ── Catálogo (US03-E1) ──
+  async function cargarProductos() {
+    const mia = ++peticion;
+    productos = []; grid.replaceChildren();   // limpia los datos anteriores antes de la nueva petición
+    mostrarCarga();
+    try {
+      const url = categoriaActiva ? '/products/category/' + encodeURIComponent(categoriaActiva) : '/products';
+      const datos = await pedir(url);
+      if (mia !== peticion) return;           // llegó una respuesta vieja: se ignora
+      productos = datos; estado.replaceChildren(); pintarGrid();
+    } catch (e) {
+      if (mia !== peticion || e.message === 'sesion') return;
+      mostrarError(e.message);
+    }
+  }
+  function pintarGrid() {
+    if (!productos.length) { grid.replaceChildren(el('p', {class: 'vacio', text: 'No hay productos en esta categoría.'})); return; }
+    grid.replaceChildren(...productos.map(p => el('article',
+      {class: 'prod', tabindex: '0', role: 'button', 'aria-label': p.titulo,
+       onclick: () => abrirDetalle(p.id),
+       onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrirDetalle(p.id); } }},
+      el('img', {src: p.imagen, alt: p.titulo, loading: 'lazy', decoding: 'async'}),   // descarga asíncrona
+      el('h3', {text: p.titulo}),
+      el('p', {class: 'precio', text: dinero(p.precio)})
+    )));
+  }
+
+  // ── Detalle (US05) ──
+  function mostrarVista(esDetalle) {
+    chips.hidden = grid.hidden = estado.hidden = esDetalle;
+    detalle.hidden = !esDetalle;
+  }
+  async function abrirDetalle(id) {
+    mostrarVista(true);
+    detalle.replaceChildren(el('div', {class: 'spinner', role: 'status', 'aria-label': 'Cargando'}));
+    try {
+      pintarDetalle(await pedir('/products/' + id));
+    } catch (e) {
+      if (e.message === 'sesion') return;
+      alert('Producto no disponible');          // US05-E3
+      volverCatalogo(true);
+    }
+  }
+  function pintarDetalle(p) {
+    detalle.replaceChildren(
+      el('button', {type: 'button', class: 'sec volver', text: '← Volver al catálogo', onclick: () => volverCatalogo(cambiado)}),
+      el('img', {class: 'det-img', src: p.imagen, alt: p.titulo, decoding: 'async'}),
+      el('h2', {class: 'det-titulo', text: p.titulo}),
+      el('p', {class: 'det-precio', text: dinero(p.precio)}),
+      el('span', {class: 'rol', text: p.categoria}),
+      el('p', {class: 'det-desc', text: p.descripcion}),
+      // Editar/Eliminar solo se crean si el rol es Administrador: no existen ocultos para los demás (US05-E1/E2)
+      ES_ADMIN ? el('div', {class: 'acciones'},
+        el('button', {type: 'button', text: 'Editar', onclick: () => pintarFormulario(p)}),
+        el('button', {type: 'button', class: 'peligro', text: 'Eliminar', onclick: () => eliminar(p)})
+      ) : null
+    );
+  }
+  async function volverCatalogo(recargar) {
+    detalle.replaceChildren(); mostrarVista(false);
+    if (recargar) { cambiado = false; await cargarCategorias(); cargarProductos(); }
+  }
+
+  async function eliminar(p) {
+    if (!confirm('¿Eliminar «' + p.titulo + '»? Esta acción no se puede deshacer.')) return;
+    try { await pedir('/products/' + p.id, {method: 'DELETE'}); volverCatalogo(true); }
+    catch (e) { if (e.message !== 'sesion') alert(e.message); }
+  }
+
+  function pintarFormulario(p) {
+    const alerta = el('div', {class: 'alerta', role: 'alert'});
+    const titulo = el('input', {id: 'ed-titulo', value: p.titulo, required: '', maxlength: '150'});
+    const precio = el('input', {id: 'ed-precio', type: 'number', step: '0.01', min: '0.01', value: String(p.precio), required: ''});
+    const descripcion = el('textarea', {id: 'ed-desc', required: '', maxlength: '2000', text: p.descripcion});
+    const categoria = el('input', {id: 'ed-cat', list: 'ed-cats', value: p.categoria, required: '', maxlength: '50'});
+    const guardar = el('button', {type: 'submit', text: 'Guardar cambios'});
+    const form = el('form', {},
+      el('label', {for: 'ed-titulo', text: 'Título'}), titulo,
+      el('label', {for: 'ed-precio', text: 'Precio'}), precio,
+      el('label', {for: 'ed-desc', text: 'Descripción'}), descripcion,
+      el('label', {for: 'ed-cat', text: 'Categoría'}), categoria,
+      el('datalist', {id: 'ed-cats'}, ...categorias.map(c => el('option', {value: c}))),
+      alerta, guardar,
+      el('button', {type: 'button', class: 'sec', text: 'Cancelar', onclick: () => pintarDetalle(p)})
+    );
+    form.addEventListener('submit', async e => {
+      e.preventDefault(); alerta.className = 'alerta'; guardar.disabled = true;
+      try {
+        const nuevo = await pedir('/products/' + p.id, {
+          method: 'PUT', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({titulo: titulo.value, precio: Number(precio.value),
+                                descripcion: descripcion.value, categoria: categoria.value})
+        });
+        cambiado = true; pintarDetalle(nuevo);
+      } catch (err) {
+        if (err.message === 'sesion') return;
+        alerta.textContent = err.message; alerta.className = 'alerta error'; guardar.disabled = false;
+      }
+    });
+    detalle.replaceChildren(el('h2', {class: 'det-titulo', text: 'Editar producto'}), form);
+  }
+
+  cargarCategorias();
+  cargarProductos();
+})();
+</script>
