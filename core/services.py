@@ -7,7 +7,9 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from .config import Config
 from .models import Producto, Rol, Usuario
-from .repository import ProductoRepository, UsuarioDuplicado, UsuarioRepository
+from .repository import (
+    CategoriaDuplicada, ProductoDuplicado, ProductoRepository, UsuarioDuplicado, UsuarioRepository,
+)
 
 
 class ErrorValidacion(Exception):
@@ -19,6 +21,14 @@ class CredencialesInvalidas(Exception):
 
 
 class ProductoNoEncontrado(Exception):
+    pass
+
+
+class CategoriaNoEncontrada(Exception):
+    pass
+
+
+class ConflictoCategoria(Exception):
     pass
 
 
@@ -83,12 +93,28 @@ class ServicioUsuarios:
             raise ErrorValidacion("Ese nombre de usuario ya existe.")
 
 
+IMAGEN_POR_DEFECTO = "static/productos/sin_imagen.jpg"
+IMAGEN_MAX_BYTES = 3 * 1024 * 1024
+
+
+def detectar_tipo_imagen(datos: bytes) -> str | None:
+    """El tipo se deduce de los primeros bytes del archivo, nunca de lo que diga el cliente."""
+    if datos.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if datos.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if datos[:4] == b"RIFF" and datos[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 class ServicioProductos:
-    """Casos de uso del catálogo: listar, filtrar por categoría, ver detalle, editar y eliminar."""
+    """Casos de uso del catálogo: consultar, crear, editar y eliminar productos y categorías."""
 
     def __init__(self, repositorio: ProductoRepository) -> None:
         self._repo = repositorio
 
+    # ── Consulta ──
     def listar(self, categoria: str | None = None) -> list[Producto]:
         return self._repo.listar((categoria or "").strip() or None)
 
@@ -101,9 +127,8 @@ class ServicioProductos:
             raise ProductoNoEncontrado()
         return producto
 
-    def actualizar(self, producto_id: int, datos: dict) -> Producto:
-        self.obtener(producto_id)  # lanza ProductoNoEncontrado si no existe
-
+    # ── Productos ──
+    def _validar(self, datos: dict) -> tuple[str, Decimal, str, str]:
         titulo = str(datos.get("titulo") or "").strip()
         descripcion = str(datos.get("descripcion") or "").strip()
         categoria = str(datos.get("categoria") or "").strip()
@@ -119,12 +144,70 @@ class ServicioProductos:
             raise ErrorValidacion("El precio debe ser un número mayor que 0.")
         if not 1 <= len(descripcion) <= 2000:
             raise ErrorValidacion("La descripción es obligatoria (máximo 2000 caracteres).")
-        if not 2 <= len(categoria) <= 50:
-            raise ErrorValidacion("La categoría debe tener de 2 a 50 caracteres.")
+        # La categoría debe existir; se guarda con el nombre exacto registrado
+        existente = next((c for c in self._repo.categorias() if c.casefold() == categoria.casefold()), None)
+        if existente is None:
+            raise ErrorValidacion("Elige una categoría existente.")
+        return titulo, precio, descripcion, existente
 
-        self._repo.actualizar(producto_id, titulo, precio, descripcion, categoria)
+    def crear(self, datos: dict) -> Producto:
+        titulo, precio, descripcion, categoria = self._validar(datos)
+        try:
+            return self._repo.crear(titulo, precio, descripcion, categoria, IMAGEN_POR_DEFECTO)
+        except ProductoDuplicado:
+            raise ErrorValidacion("Ya existe un producto con ese título.")
+
+    def actualizar(self, producto_id: int, datos: dict) -> Producto:
+        self.obtener(producto_id)  # lanza ProductoNoEncontrado si no existe
+        titulo, precio, descripcion, categoria = self._validar(datos)
+        try:
+            self._repo.actualizar(producto_id, titulo, precio, descripcion, categoria)
+        except ProductoDuplicado:
+            raise ErrorValidacion("Ya existe un producto con ese título.")
         return self.obtener(producto_id)
 
     def eliminar(self, producto_id: int) -> None:
         if not self._repo.eliminar(producto_id):
             raise ProductoNoEncontrado()
+
+    # ── Imágenes ──
+    def subir_imagen(self, producto_id: int, datos: bytes) -> Producto:
+        self.obtener(producto_id)
+        if not datos:
+            raise ErrorValidacion("No se recibió ninguna imagen.")
+        if len(datos) > IMAGEN_MAX_BYTES:
+            raise ErrorValidacion("La imagen es demasiado grande (máximo 3 MB).")
+        tipo = detectar_tipo_imagen(datos)
+        if tipo is None:
+            raise ErrorValidacion("La imagen debe ser JPG, PNG o WEBP.")
+        self._repo.guardar_imagen(producto_id, tipo, datos)
+        return self.obtener(producto_id)
+
+    def obtener_imagen(self, producto_id: int) -> tuple[str, bytes]:
+        imagen = self._repo.obtener_imagen(producto_id)
+        if imagen is None:
+            raise ProductoNoEncontrado()
+        return imagen
+
+    # ── Categorías ──
+    def crear_categoria(self, nombre: str) -> str:
+        nombre = (nombre or "").strip()
+        if not 2 <= len(nombre) <= 50:
+            raise ErrorValidacion("La categoría debe tener de 2 a 50 caracteres.")
+        try:
+            self._repo.crear_categoria(nombre)
+        except CategoriaDuplicada:
+            raise ErrorValidacion("Esa categoría ya existe.")
+        return nombre
+
+    def eliminar_categoria(self, nombre: str) -> None:
+        existente = next((c for c in self._repo.categorias() if c.casefold() == (nombre or "").strip().casefold()), None)
+        if existente is None:
+            raise CategoriaNoEncontrada()
+        cantidad = self._repo.contar_por_categoria(existente)
+        if cantidad > 0:
+            raise ConflictoCategoria(
+                f"No se puede eliminar «{existente}»: tiene {cantidad} producto(s). "
+                "Elimínalos o cámbialos de categoría primero."
+            )
+        self._repo.eliminar_categoria(existente)

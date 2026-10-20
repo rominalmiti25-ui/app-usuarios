@@ -16,6 +16,7 @@ def create_app() -> Flask:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)  # HTTPS detrás de Vercel
     app.json.ensure_ascii = False
     app.json.sort_keys = False
+    app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel admite hasta 4.5 MB por petición
 
     config = Config()
     base_datos = Database(config)
@@ -35,13 +36,10 @@ def create_app() -> Flask:
         app.logger.error("No se pudo inicializar la base de datos: %s", error)
 
     try:
-        # Catálogo inicial: solo se carga si la tabla productos está vacía
-        if repositorio_productos.contar() == 0:
-            for item in PRODUCTOS_SEMILLA:
-                repositorio_productos.crear(**item)
-            app.logger.info("Catálogo inicial creado: %d productos", len(PRODUCTOS_SEMILLA))
+        # Migraciones del catálogo + carga inicial (una sola vez, sin duplicar aunque arranquen varias instancias)
+        repositorio_productos.preparar(PRODUCTOS_SEMILLA)
     except Exception as error:
-        app.logger.error("No se pudo cargar el catálogo inicial: %s", error)
+        app.logger.error("No se pudo preparar el catálogo: %s", error)
 
     registrar_rutas(app, auth, usuarios, productos)
     return app

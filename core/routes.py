@@ -1,14 +1,16 @@
+import re
 from functools import wraps
 
 from flask import Flask, g, jsonify, make_response, redirect, render_template, request, send_from_directory
 
 from .models import Rol
 from .services import (
-    CredencialesInvalidas, ErrorValidacion, ProductoNoEncontrado,
+    CategoriaNoEncontrada, ConflictoCategoria, CredencialesInvalidas, ErrorValidacion, ProductoNoEncontrado,
     ServicioAutenticacion, ServicioProductos, ServicioUsuarios,
 )
 
 COOKIE = "token"
+RUTA_IMAGEN_SUBIDA = re.compile(r"^/products/\d+/image$")
 
 # Cada rol ve una pantalla distinta después de iniciar sesión
 PANTALLAS = {
@@ -56,6 +58,10 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
         # Las imágenes públicas del catálogo sí se pueden guardar en caché (rendimiento)
         if request.path.startswith("/static/productos/"):
             resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+        # Imágenes subidas: la URL lleva ?v=<versión>, así que pueden guardarse mucho tiempo
+        if resp.status_code == 200 and request.method == "GET" and RUTA_IMAGEN_SUBIDA.match(request.path):
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             return resp
         # Evita que el botón "Atrás" muestre vistas protegidas guardadas en caché (US02)
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -128,6 +134,60 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
             return jsonify(error="Producto no disponible"), 404
         return jsonify(ok=True)
 
+    # ── Administración del catálogo (solo Administrador) ──
+
+    @app.post("/products")
+    @requiere_rol(Rol.ADMINISTRADOR)
+    def api_crear_producto():
+        cuerpo = request.get_json(silent=True) or {}
+        try:
+            return jsonify(producto_json(productos.crear(cuerpo))), 201
+        except ErrorValidacion as error:
+            return jsonify(error=str(error)), 400
+
+    @app.put("/products/<int:producto_id>/image")
+    @requiere_rol(Rol.ADMINISTRADOR)
+    def api_subir_imagen(producto_id):
+        # El cuerpo de la petición es la imagen tal cual (JPG, PNG o WEBP)
+        try:
+            return jsonify(producto_json(productos.subir_imagen(producto_id, request.get_data(cache=False))))
+        except ProductoNoEncontrado:
+            return jsonify(error="Producto no disponible"), 404
+        except ErrorValidacion as error:
+            return jsonify(error=str(error)), 400
+
+    @app.get("/products/<int:producto_id>/image")
+    def api_imagen(producto_id):
+        # Pública a propósito: así la descargan las etiquetas <img> y Image.network sin enviar la cookie
+        try:
+            tipo, datos = productos.obtener_imagen(producto_id)
+        except ProductoNoEncontrado:
+            return jsonify(error="Imagen no disponible"), 404
+        resp = make_response(datos)
+        resp.headers["Content-Type"] = tipo
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
+
+    @app.post("/products/categories")
+    @requiere_rol(Rol.ADMINISTRADOR)
+    def api_crear_categoria():
+        cuerpo = request.get_json(silent=True) or {}
+        try:
+            return jsonify(nombre=productos.crear_categoria(cuerpo.get("nombre"))), 201
+        except ErrorValidacion as error:
+            return jsonify(error=str(error)), 400
+
+    @app.delete("/products/categories/<nombre>")
+    @requiere_rol(Rol.ADMINISTRADOR)
+    def api_eliminar_categoria(nombre):
+        try:
+            productos.eliminar_categoria(nombre)
+        except CategoriaNoEncontrada:
+            return jsonify(error="La categoría no existe"), 404
+        except ConflictoCategoria as error:
+            return jsonify(error=str(error)), 409
+        return jsonify(ok=True)
+
     # ───────────────────────── Autenticación ─────────────────────────
 
     @app.post("/auth/login")
@@ -175,6 +235,10 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
     def service_worker():
         # Se sirve desde la raíz para que controle todo el sitio
         return send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
+
+    @app.errorhandler(413)
+    def archivo_muy_grande(_):
+        return jsonify(error="La imagen es demasiado grande (máximo 3 MB)."), 413
 
     @app.errorhandler(500)
     def error_interno(_):

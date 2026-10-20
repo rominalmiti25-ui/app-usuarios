@@ -61,7 +61,38 @@ class Database:
                     categoria VARCHAR(50) NOT NULL,
                     imagen VARCHAR(255) NOT NULL,
                     PRIMARY KEY (id),
+                    UNIQUE KEY uq_titulo (titulo),
                     KEY idx_categoria (categoria)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS categorias (
+                    nombre VARCHAR(50) NOT NULL,
+                    PRIMARY KEY (nombre)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            # Las imágenes subidas por el administrador se guardan aquí (el disco de Vercel es de solo lectura)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS producto_imagenes (
+                    producto_id INT NOT NULL,
+                    tipo VARCHAR(30) NOT NULL,
+                    datos MEDIUMBLOB NOT NULL,
+                    version BIGINT NOT NULL,
+                    PRIMARY KEY (producto_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            # Marcas de tareas que se hacen una sola vez (migraciones y catálogo inicial)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ajustes (
+                    clave VARCHAR(50) NOT NULL,
+                    valor VARCHAR(100) NOT NULL,
+                    PRIMARY KEY (clave)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
