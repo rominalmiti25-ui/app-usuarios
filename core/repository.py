@@ -3,10 +3,14 @@ import time
 import pymysql
 
 from .database import Database
-from .models import Producto, Usuario
+from .models import Producto, Rol, Usuario
 
 
 class UsuarioDuplicado(Exception):
+    pass
+
+
+class UltimoAdministrador(Exception):
     pass
 
 
@@ -33,6 +37,26 @@ class UsuarioRepository:
         with self._db.transaccion() as cur:
             cur.execute("SELECT COUNT(*) AS total FROM usuarios")
             return int(cur.fetchone()["total"])
+
+    def obtener_por_id(self, usuario_id: int) -> Usuario | None:
+        with self._db.transaccion() as cur:
+            cur.execute("SELECT id, usuario, rol FROM usuarios WHERE id = %s", (usuario_id,))
+            fila = cur.fetchone()
+            return Usuario.desde_fila(fila) if fila else None
+
+    def eliminar(self, usuario_id: int) -> bool:
+        """Elimina al usuario; nunca deja el sistema sin administradores (comprobación con bloqueo)."""
+        with self._db.transaccion() as cur:
+            cur.execute("SELECT rol FROM usuarios WHERE id = %s FOR UPDATE", (usuario_id,))
+            fila = cur.fetchone()
+            if not fila:
+                return False
+            if fila["rol"] == Rol.ADMINISTRADOR:
+                cur.execute("SELECT COUNT(*) AS total FROM usuarios WHERE rol = %s FOR UPDATE", (Rol.ADMINISTRADOR,))
+                if int(cur.fetchone()["total"]) <= 1:
+                    raise UltimoAdministrador()
+            cur.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
+            return True
 
     def obtener_por_usuario(self, nombre: str) -> Usuario | None:
         with self._db.transaccion() as cur:

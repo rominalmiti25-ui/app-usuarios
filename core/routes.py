@@ -6,7 +6,7 @@ from flask import Flask, g, jsonify, make_response, redirect, render_template, r
 from .models import Rol
 from .services import (
     CategoriaNoEncontrada, ConflictoCategoria, CredencialesInvalidas, ErrorValidacion, ProductoNoEncontrado,
-    ServicioAutenticacion, ServicioProductos, ServicioUsuarios,
+    ServicioAutenticacion, ServicioProductos, ServicioUsuarios, UsuarioNoEncontrado,
 )
 
 COOKIE = "token"
@@ -36,6 +36,8 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
 
     def requiere_rol(*roles):
         """Para la API: 401 si no hay sesión, 403 si el rol no tiene permiso."""
+        solo_admin = roles == (Rol.ADMINISTRADOR,)
+
         def decorador(vista):
             @wraps(vista)
             def envoltura(*args, **kwargs):
@@ -44,6 +46,10 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
                     return jsonify(error="Sesión no válida. Inicia sesión."), 401
                 if datos.get("rol") not in roles:
                     return jsonify(error="No tienes permiso para esta acción."), 403
+                # Acciones de administración: la cuenta debe seguir existiendo (el token dura horas,
+                # así que un administrador eliminado no puede seguir administrando con su sesión abierta)
+                if solo_admin and not usuarios.sigue_siendo_administrador(datos.get("sub")):
+                    return jsonify(error="Sesión no válida. Inicia sesión."), 401
                 g.sesion = datos
                 return vista(*args, **kwargs)
             return envoltura
@@ -88,6 +94,17 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
     @requiere_rol(Rol.ADMINISTRADOR, Rol.AUDITOR)
     def ver_usuarios():
         return jsonify(usuarios.listar())
+
+    @app.delete("/usuarios/<int:usuario_id>")
+    @requiere_rol(Rol.ADMINISTRADOR)
+    def eliminar_usuario(usuario_id):
+        try:
+            usuarios.eliminar(usuario_id, int(g.sesion["sub"]))
+        except UsuarioNoEncontrado:
+            return jsonify(error="El usuario no existe"), 404
+        except ErrorValidacion as error:
+            return jsonify(error=str(error)), 400
+        return jsonify(ok=True)
 
     # ───────────────────────── Catálogo de productos (US03, US04, US05) ─────────────────────────
 

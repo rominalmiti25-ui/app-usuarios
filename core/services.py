@@ -8,7 +8,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from .config import Config
 from .models import Producto, Rol, Usuario
 from .repository import (
-    CategoriaDuplicada, ProductoDuplicado, ProductoRepository, UsuarioDuplicado, UsuarioRepository,
+    CategoriaDuplicada, ProductoDuplicado, ProductoRepository, UltimoAdministrador, UsuarioDuplicado,
+    UsuarioRepository,
 )
 
 
@@ -21,6 +22,10 @@ class CredencialesInvalidas(Exception):
 
 
 class ProductoNoEncontrado(Exception):
+    pass
+
+
+class UsuarioNoEncontrado(Exception):
     pass
 
 
@@ -91,6 +96,24 @@ class ServicioUsuarios:
             return self._repo.crear(nombre, self._auth.hashear(contrasena), rol)
         except UsuarioDuplicado:
             raise ErrorValidacion("Ese nombre de usuario ya existe.")
+
+    def eliminar(self, usuario_id: int, solicitante_id: int) -> None:
+        if usuario_id == solicitante_id:
+            raise ErrorValidacion("No puedes eliminar tu propia cuenta.")
+        try:
+            if not self._repo.eliminar(usuario_id):
+                raise UsuarioNoEncontrado()
+        except UltimoAdministrador:
+            raise ErrorValidacion("No se puede eliminar al último administrador.")
+
+    def sigue_siendo_administrador(self, usuario_id) -> bool:
+        """El token dura horas: antes de una acción de administración se confirma que la cuenta sigue existiendo."""
+        try:
+            identificador = int(usuario_id)
+        except (TypeError, ValueError):
+            return False
+        usuario = self._repo.obtener_por_id(identificador)
+        return usuario is not None and usuario.rol == Rol.ADMINISTRADOR
 
 
 IMAGEN_POR_DEFECTO = "static/productos/sin_imagen.jpg"

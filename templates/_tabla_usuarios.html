@@ -1,17 +1,37 @@
+<style>
+  .btn-borrar{width:auto;margin:0;padding:6px 12px;font-size:.8rem;background:#dc2626;color:#fff;border-radius:8px}
+  .tu-cuenta{color:#64748b;font-size:.8rem}
+</style>
 <h2>Usuarios</h2>
 <div class="tabla-wrap">
   <table>
-    <thead><tr><th>ID</th><th>Usuario</th><th>Rol</th></tr></thead>
-    <tbody id="filas"><tr><td colspan="3">Cargando…</td></tr></tbody>
+    <thead><tr><th>ID</th><th>Usuario</th><th>Rol</th>{% if sesion.rol == 'Administrador' %}<th></th>{% endif %}</tr></thead>
+    <tbody id="filas"><tr><td colspan="{{ 4 if sesion.rol == 'Administrador' else 3 }}">Cargando…</td></tr></tbody>
   </table>
 </div>
 <a class="btn" href="/usuarios" target="_blank" rel="noopener">Ver JSON</a>
 <script>
+  // El perfil viene de la sesión del servidor: solo el Administrador recibe el botón Eliminar
+  const PUEDE_ELIMINAR = {{ 'true' if sesion.rol == 'Administrador' else 'false' }};
+  const MI_ID = {{ sesion.sub|int }};
+  const COLUMNAS = PUEDE_ELIMINAR ? 4 : 3;
+
+  async function eliminarUsuario(u) {
+    if (!confirm('¿Eliminar al usuario «' + u.usuario + '» (' + u.rol + ')? Esta acción no se puede deshacer.')) return;
+    try {
+      const r = await fetch('/usuarios/' + u.id, {method: 'DELETE'});
+      if (r.status === 401) return location.replace('/login');
+      if (r.ok) return cargarUsuarios();
+      const d = await r.json().catch(() => ({}));
+      alert(d.error || 'No se pudo eliminar el usuario.');
+    } catch { alert('No se pudo conectar con el servidor.'); }
+  }
+
   async function cargarUsuarios() {
     const filas = document.getElementById('filas');
     const unaFila = texto => {
       const tr = document.createElement('tr'), td = document.createElement('td');
-      td.colSpan = 3; td.textContent = texto; tr.appendChild(td); return tr;
+      td.colSpan = COLUMNAS; td.textContent = texto; tr.appendChild(td); return tr;
     };
     try {
       const r = await fetch('/usuarios');
@@ -23,6 +43,19 @@
         [u.id, u.usuario, u.rol].forEach(v => {
           const td = document.createElement('td'); td.textContent = v; tr.appendChild(td);
         });
+        if (PUEDE_ELIMINAR) {
+          const td = document.createElement('td');
+          if (u.id === MI_ID) {            // no puedes eliminar tu propia cuenta
+            const t = document.createElement('span'); t.className = 'tu-cuenta'; t.textContent = 'Tu cuenta'; td.appendChild(t);
+          } else {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'btn-borrar'; b.textContent = 'Eliminar';
+            b.setAttribute('aria-label', 'Eliminar a ' + u.usuario);
+            b.addEventListener('click', () => eliminarUsuario(u));
+            td.appendChild(b);
+          }
+          tr.appendChild(td);
+        }
         return tr;
       }));
     } catch { filas.replaceChildren(unaFila('No se pudo conectar con el servidor.')); }
