@@ -146,7 +146,7 @@
     productos = []; grid.replaceChildren();   // limpia los datos anteriores antes de la nueva petición
     mostrarCarga();
     try {
-      const url = categoriaActiva ? '/products/category/' + encodeURIComponent(categoriaActiva) : '/products';
+      const url = categoriaActiva ? '/products?categoria=' + encodeURIComponent(categoriaActiva) : '/products';
       const datos = await pedir(url);
       if (mia !== peticion) return;           // llegó una respuesta vieja: se ignora
       productos = datos; estado.replaceChildren(); pintarGrid();
@@ -235,7 +235,7 @@
   async function eliminarCategoria() {
     if (!categoriaActiva || !confirm('¿Eliminar la categoría «' + categoriaActiva + '»?')) return;
     try {
-      await pedir('/products/categories/' + encodeURIComponent(categoriaActiva), {method: 'DELETE'});
+      await pedir('/products/categories?nombre=' + encodeURIComponent(categoriaActiva), {method: 'DELETE'});
       categoriaActiva = null; recargarTodo();
     } catch (e) { if (e.message !== 'sesion') alert(e.message); }   // p. ej. «tiene productos»
   }

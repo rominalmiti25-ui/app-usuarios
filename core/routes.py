@@ -1,5 +1,6 @@
 import re
 from functools import wraps
+from urllib.parse import parse_qs, unquote
 
 from flask import Flask, g, jsonify, make_response, redirect, render_template, request, send_from_directory
 
@@ -18,6 +19,28 @@ PANTALLAS = {
     Rol.AUDITOR: "home_auditor.html",
     Rol.CLIENTE: "home_cliente.html",
 }
+
+
+def _reparar(texto: str) -> str:
+    """Si un nombre con acentos llegó con la codificación de WSGI (latin-1 sobre UTF-8), lo devuelve a su forma real."""
+    try:
+        return texto.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return texto
+
+
+def _consulta(nombre: str) -> str | None:
+    """Lee un parámetro de la URL (?nombre=valor) con acentos y espacios bien decodificados."""
+    valores = parse_qs(request.environ.get("QUERY_STRING", ""), keep_blank_values=True).get(nombre)
+    return _reparar(valores[0]).strip() if valores else None
+
+
+def _variantes(texto: str) -> list[str]:
+    salida: list[str] = []
+    for t in (texto, unquote(texto), _reparar(texto), _reparar(unquote(texto))):
+        if t not in salida:
+            salida.append(t)
+    return salida
 
 
 def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioUsuarios,
@@ -54,6 +77,20 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
                 return vista(*args, **kwargs)
             return envoltura
         return decorador
+
+    def categoria_de_ruta(segmento: str) -> str | None:
+        """Nombre exacto de la categoría a partir de lo que llegó en la ruta.
+
+        Según el servidor, un nombre con acento puede llegar ya decodificado, con codificación distinta o aún con
+        %XX; se prueban todas las formas contra las categorías que existen.
+        """
+        crudo = request.environ.get("PATH_INFO", "").rsplit("/", 1)[-1]
+        conocidas = productos.categorias()
+        for candidato in _variantes(segmento) + _variantes(crudo):
+            for nombre in conocidas:
+                if nombre.casefold() == candidato.strip().casefold():
+                    return nombre
+        return None
 
     def producto_json(producto) -> dict:
         # La imagen se entrega como URL completa para que web y app la descarguen igual
@@ -111,7 +148,8 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
     @app.get("/products")
     @requiere_rol(*Rol.TODOS)
     def api_productos():
-        return jsonify([producto_json(p) for p in productos.listar()])
+        # ?categoria=Nombre filtra por categoría (el nombre viaja como parámetro: los acentos llegan bien)
+        return jsonify([producto_json(p) for p in productos.listar(_consulta("categoria"))])
 
     @app.get("/products/categories")
     @requiere_rol(*Rol.TODOS)
@@ -121,7 +159,8 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
     @app.get("/products/category/<categoria>")
     @requiere_rol(*Rol.TODOS)
     def api_productos_por_categoria(categoria):
-        return jsonify([producto_json(p) for p in productos.listar(categoria)])
+        nombre = categoria_de_ruta(categoria)
+        return jsonify([] if nombre is None else [producto_json(p) for p in productos.listar(nombre)])
 
     @app.get("/products/<int:producto_id>")
     @requiere_rol(*Rol.TODOS)
@@ -194,11 +233,24 @@ def registrar_rutas(app: Flask, auth: ServicioAutenticacion, usuarios: ServicioU
         except ErrorValidacion as error:
             return jsonify(error=str(error)), 400
 
+    @app.delete("/products/categories")
+    @requiere_rol(Rol.ADMINISTRADOR)
+    def api_eliminar_categoria_param():
+        # Principal: DELETE /products/categories?nombre=Tecnología
+        try:
+            productos.eliminar_categoria(_consulta("nombre") or "")
+        except CategoriaNoEncontrada:
+            return jsonify(error="La categoría no existe"), 404
+        except ConflictoCategoria as error:
+            return jsonify(error=str(error)), 409
+        return jsonify(ok=True)
+
     @app.delete("/products/categories/<nombre>")
     @requiere_rol(Rol.ADMINISTRADOR)
     def api_eliminar_categoria(nombre):
+        # Respaldo: el nombre en la ruta
         try:
-            productos.eliminar_categoria(nombre)
+            productos.eliminar_categoria(categoria_de_ruta(nombre) or "")
         except CategoriaNoEncontrada:
             return jsonify(error="La categoría no existe"), 404
         except ConflictoCategoria as error:
